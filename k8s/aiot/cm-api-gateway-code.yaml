@@ -1,0 +1,96 @@
+apiVersion: v1
+data:
+  gateway.py: "from fastapi import FastAPI, Request\nimport requests as req\nimport
+    json, hashlib, math, time, re, os\n\napp = FastAPI(title=\"Cerebrus AIoT Gateway\")\n\nQDRANT_URL
+    \  = \"http://qdrant.aiot.svc.cluster.local:6333\"\nTWIN_URL     = \"http://digital-twin.aiot.svc.cluster.local:8001\"\nCEREBRAS_URL
+    = \"https://api.cerebras.ai/v1/chat/completions\"\nCEREBRAS_KEY = os.environ.get(\"CEREBRAS_API_KEY\",
+    \"\")\nCEREBRAS_MODEL = \"llama3.1-8b\"\nVECTOR_SIZE  = 64\n\nSYSTEM_PROMPT =
+    \"\"\"You are Cerebrus AIoT — an intelligent industrial IoT monitoring assistant.\nYou
+    analyze sensor data from factory machines (pumps, turbines, motors, compressors,
+    conveyors, generators).\n\nRULES:\n- Answer in the SAME LANGUAGE as the user's
+    question (Slovak, Czech, English, etc.)\n- Be concise but thorough\n- Always reference
+    actual machine data provided in context\n- Highlight critical issues first\n-
+    Give actionable recommendations\n- Use units: temperature=°C, vibration=mm/s,
+    pressure=bar, RPM\n- Status levels: OK (green), WARNING (needs attention), CRITICAL
+    (immediate action)\n- If asked about trends, use the historical sensor data provided\n-
+    Format output clearly with headers and bullet points\"\"\"\n\ndef simple_embed(text):\n
+    \   vec = []\n    for i in range(VECTOR_SIZE):\n        h = hashlib.md5(f\"{text}{i}\".encode()).hexdigest()\n
+    \       vec.append((int(h[:8], 16) / 0xFFFFFFFF) * 2 - 1)\n    norm = math.sqrt(sum(x*x
+    for x in vec))\n    return [x/norm for x in vec]\n\ndef get_twin():\n    try:\n
+    \       r = req.get(f\"{TWIN_URL}/twin\", timeout=5)\n        return r.json()
+    if r.status_code == 200 else {}\n    except:\n        return {}\n\ndef search_qdrant(query,
+    limit=10):\n    try:\n        embedding = simple_embed(query)\n        r = req.post(f\"{QDRANT_URL}/collections/sensor_history/points/search\",\n
+    \           json={\"vector\": embedding, \"limit\": limit, \"with_payload\": True},
+    timeout=10)\n        return r.json().get(\"result\", [])\n    except:\n        return
+    []\n\ndef build_context(query):\n    \"\"\"Build rich context from Digital Twin
+    + Qdrant for LLM\"\"\"\n    twin = get_twin()\n    machines = twin.get(\"machines\",
+    {})\n    summary = twin.get(\"summary\", {})\n    \n    ok = summary.get(\"ok\",
+    0)\n    warn = summary.get(\"warning\", 0)\n    crit = summary.get(\"critical\",
+    0)\n    total = ok + warn + crit\n    \n    ctx = []\n    ctx.append(f\"=== FACTORY
+    STATUS ===\")\n    ctx.append(f\"Total: {total} machines | OK: {ok} | WARNING:
+    {warn} | CRITICAL: {crit}\")\n    ctx.append(f\"Critical machines: {', '.join(summary.get('critical_machines',
+    []))}\")\n    ctx.append(f\"Warning machines: {', '.join(summary.get('warning_machines',
+    []))}\")\n    ctx.append(\"\")\n    \n    ctx.append(\"=== ALL MACHINES ===\")\n
+    \   for mid in sorted(machines.keys()):\n        m = machines[mid]\n        mt
+    = m.get(\"metrics\", {})\n        st = m.get(\"status\", \"\").upper()\n        viols
+    = m.get(\"violations\", [])\n        line = f\"{mid} ({m.get('machine_type','')})
+    [{st}] T={mt.get('temperature','-')}°C V={mt.get('vibration','-')}mm/s P={mt.get('pressure','-')}bar
+    RPM={mt.get('rpm','-')} H={mt.get('humidity','-')}%\"\n        if viols:\n            viol_str
+    = \"; \".join([f\"{v['metric']}={v['value']} (limit={v.get('limit','')})\" for
+    v in viols])\n            line += f\" VIOLATIONS: {viol_str}\"\n        ctx.append(line)\n
+    \   \n    # Qdrant history\n    results = search_qdrant(query, 5)\n    if results:\n
+    \       ctx.append(\"\")\n        ctx.append(\"=== RECENT SENSOR HISTORY (from
+    vector DB) ===\")\n        for r in results:\n            text = r.get(\"payload\",
+    {}).get(\"text\", \"\")\n            if text:\n                ctx.append(text)\n
+    \   \n    return \"\\n\".join(ctx)\n\ndef call_cerebras(system_msg, context, user_query):\n
+    \   \"\"\"Call Cerebras LLM API\"\"\"\n    try:\n        messages = [\n            {\"role\":
+    \"system\", \"content\": system_msg},\n            {\"role\": \"user\", \"content\":
+    f\"MACHINE DATA:\\n{context}\\n\\nUSER QUESTION: {user_query}\"}\n        ]\n
+    \       r = req.post(CEREBRAS_URL,\n            headers={\n                \"Authorization\":
+    f\"Bearer {CEREBRAS_KEY}\",\n                \"Content-Type\": \"application/json\"\n
+    \           },\n            json={\n                \"model\": CEREBRAS_MODEL,\n
+    \               \"messages\": messages,\n                \"max_tokens\": 2048,\n
+    \               \"temperature\": 0.3\n            },\n            timeout=30\n
+    \       )\n        if r.status_code == 200:\n            data = r.json()\n            return
+    data[\"choices\"][0][\"message\"][\"content\"]\n        else:\n            return
+    f\"LLM Error ({r.status_code}): {r.text[:200]}\"\n    except Exception as e:\n
+    \       return f\"LLM Connection Error: {str(e)}\"\n\ndef generate_analysis(query):\n
+    \   \"\"\"Generate intelligent analysis using Cerebras LLM\"\"\"\n    context
+    = build_context(query)\n    answer = call_cerebras(SYSTEM_PROMPT, context, query)\n
+    \   return answer\n\n# === API Endpoints ===\n@app.get(\"/\")\ndef root():\n    return
+    {\"service\": \"Cerebrus AIoT\", \"version\": \"3.0-LLM\", \"status\": \"running\",
+    \"llm\": CEREBRAS_MODEL}\n\n@app.get(\"/health\")\ndef health():\n    try:\n        r
+    = req.get(f\"{QDRANT_URL}/collections/sensor_history\", timeout=5)\n        info
+    = r.json().get(\"result\", {})\n        twin = get_twin()\n        return {\"status\":
+    \"healthy\", \"qdrant_points\": info.get(\"points_count\", 0),\n                \"machines\":
+    len(twin.get(\"machines\", {})), \"llm\": CEREBRAS_MODEL}\n    except Exception
+    as e:\n        return {\"status\": \"degraded\", \"error\": str(e)}\n\n@app.get(\"/search\")\ndef
+    search(q: str = \"temperature\", limit: int = 10):\n    results = search_qdrant(q,
+    limit)\n    return {\"query\": q, \"count\": len(results),\n            \"results\":
+    [{\"score\": p.get(\"score\"), \"text\": p.get(\"payload\", {}).get(\"text\",
+    \"\")} for p in results]}\n\n@app.get(\"/stats\")\ndef stats():\n    r = req.get(f\"{QDRANT_URL}/collections/sensor_history\",
+    timeout=5)\n    info = r.json().get(\"result\", {})\n    twin = get_twin()\n    return
+    {\"points\": info.get(\"points_count\", 0), \"machines\": len(twin.get(\"machines\",
+    {})),\n            \"twin_summary\": twin.get(\"summary\", {})}\n\n@app.get(\"/analyze\")\ndef
+    analyze(q: str = \"summary\"):\n    return {\"query\": q, \"analysis\": generate_analysis(q)}\n\n@app.get(\"/v1/models\")\ndef
+    models():\n    return {\"object\": \"list\", \"data\": [{\"id\": \"cerebrus-aiot\",
+    \"object\": \"model\"}]}\n\n@app.post(\"/v1/chat/completions\")\nasync def chat(request:
+    Request):\n    body = await request.json()\n    msgs = body.get(\"messages\",
+    [])\n    user_msgs = [m for m in msgs if m.get(\"role\") == \"user\"]\n    q =
+    user_msgs[-1][\"content\"].strip() if user_msgs else \"summary\"\n    \n    #
+    Stream support check\n    stream = body.get(\"stream\", False)\n    \n    answer
+    = generate_analysis(q)\n    \n    return {\n        \"id\": f\"cerebrus-{int(time.time())}\",\n
+    \       \"object\": \"chat.completion\",\n        \"model\": \"cerebrus-aiot\",\n
+    \       \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\":
+    answer}, \"finish_reason\": \"stop\"}],\n        \"usage\": {\"prompt_tokens\":
+    0, \"completion_tokens\": 0, \"total_tokens\": 0}\n    }\n"
+kind: ConfigMap
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"v1","data":{"gateway.py":"from fastapi import FastAPI, Request\nimport requests as req\nimport json, hashlib, math, time, re, os\n\napp = FastAPI(title=\"Cerebrus AIoT Gateway\")\n\nQDRANT_URL   = \"http://qdrant.aiot.svc.cluster.local:6333\"\nTWIN_URL     = \"http://digital-twin.aiot.svc.cluster.local:8001\"\nCEREBRAS_URL = \"https://api.cerebras.ai/v1/chat/completions\"\nCEREBRAS_KEY = os.environ.get(\"CEREBRAS_API_KEY\", \"\")\nCEREBRAS_MODEL = \"llama3.1-8b\"\nVECTOR_SIZE  = 64\n\nSYSTEM_PROMPT = \"\"\"You are Cerebrus AIoT — an intelligent industrial IoT monitoring assistant.\nYou analyze sensor data from factory machines (pumps, turbines, motors, compressors, conveyors, generators).\n\nRULES:\n- Answer in the SAME LANGUAGE as the user's question (Slovak, Czech, English, etc.)\n- Be concise but thorough\n- Always reference actual machine data provided in context\n- Highlight critical issues first\n- Give actionable recommendations\n- Use units: temperature=°C, vibration=mm/s, pressure=bar, RPM\n- Status levels: OK (green), WARNING (needs attention), CRITICAL (immediate action)\n- If asked about trends, use the historical sensor data provided\n- Format output clearly with headers and bullet points\"\"\"\n\ndef simple_embed(text):\n    vec = []\n    for i in range(VECTOR_SIZE):\n        h = hashlib.md5(f\"{text}{i}\".encode()).hexdigest()\n        vec.append((int(h[:8], 16) / 0xFFFFFFFF) * 2 - 1)\n    norm = math.sqrt(sum(x*x for x in vec))\n    return [x/norm for x in vec]\n\ndef get_twin():\n    try:\n        r = req.get(f\"{TWIN_URL}/twin\", timeout=5)\n        return r.json() if r.status_code == 200 else {}\n    except:\n        return {}\n\ndef search_qdrant(query, limit=10):\n    try:\n        embedding = simple_embed(query)\n        r = req.post(f\"{QDRANT_URL}/collections/sensor_history/points/search\",\n            json={\"vector\": embedding, \"limit\": limit, \"with_payload\": True}, timeout=10)\n        return r.json().get(\"result\", [])\n    except:\n        return []\n\ndef build_context(query):\n    \"\"\"Build rich context from Digital Twin + Qdrant for LLM\"\"\"\n    twin = get_twin()\n    machines = twin.get(\"machines\", {})\n    summary = twin.get(\"summary\", {})\n    \n    ok = summary.get(\"ok\", 0)\n    warn = summary.get(\"warning\", 0)\n    crit = summary.get(\"critical\", 0)\n    total = ok + warn + crit\n    \n    ctx = []\n    ctx.append(f\"=== FACTORY STATUS ===\")\n    ctx.append(f\"Total: {total} machines | OK: {ok} | WARNING: {warn} | CRITICAL: {crit}\")\n    ctx.append(f\"Critical machines: {', '.join(summary.get('critical_machines', []))}\")\n    ctx.append(f\"Warning machines: {', '.join(summary.get('warning_machines', []))}\")\n    ctx.append(\"\")\n    \n    ctx.append(\"=== ALL MACHINES ===\")\n    for mid in sorted(machines.keys()):\n        m = machines[mid]\n        mt = m.get(\"metrics\", {})\n        st = m.get(\"status\", \"\").upper()\n        viols = m.get(\"violations\", [])\n        line = f\"{mid} ({m.get('machine_type','')}) [{st}] T={mt.get('temperature','-')}°C V={mt.get('vibration','-')}mm/s P={mt.get('pressure','-')}bar RPM={mt.get('rpm','-')} H={mt.get('humidity','-')}%\"\n        if viols:\n            viol_str = \"; \".join([f\"{v['metric']}={v['value']} (limit={v.get('limit','')})\" for v in viols])\n            line += f\" VIOLATIONS: {viol_str}\"\n        ctx.append(line)\n    \n    # Qdrant history\n    results = search_qdrant(query, 5)\n    if results:\n        ctx.append(\"\")\n        ctx.append(\"=== RECENT SENSOR HISTORY (from vector DB) ===\")\n        for r in results:\n            text = r.get(\"payload\", {}).get(\"text\", \"\")\n            if text:\n                ctx.append(text)\n    \n    return \"\\n\".join(ctx)\n\ndef call_cerebras(system_msg, context, user_query):\n    \"\"\"Call Cerebras LLM API\"\"\"\n    try:\n        messages = [\n            {\"role\": \"system\", \"content\": system_msg},\n            {\"role\": \"user\", \"content\": f\"MACHINE DATA:\\n{context}\\n\\nUSER QUESTION: {user_query}\"}\n        ]\n        r = req.post(CEREBRAS_URL,\n            headers={\n                \"Authorization\": f\"Bearer {CEREBRAS_KEY}\",\n                \"Content-Type\": \"application/json\"\n            },\n            json={\n                \"model\": CEREBRAS_MODEL,\n                \"messages\": messages,\n                \"max_tokens\": 2048,\n                \"temperature\": 0.3\n            },\n            timeout=30\n        )\n        if r.status_code == 200:\n            data = r.json()\n            return data[\"choices\"][0][\"message\"][\"content\"]\n        else:\n            return f\"LLM Error ({r.status_code}): {r.text[:200]}\"\n    except Exception as e:\n        return f\"LLM Connection Error: {str(e)}\"\n\ndef generate_analysis(query):\n    \"\"\"Generate intelligent analysis using Cerebras LLM\"\"\"\n    context = build_context(query)\n    answer = call_cerebras(SYSTEM_PROMPT, context, query)\n    return answer\n\n# === API Endpoints ===\n@app.get(\"/\")\ndef root():\n    return {\"service\": \"Cerebrus AIoT\", \"version\": \"3.0-LLM\", \"status\": \"running\", \"llm\": CEREBRAS_MODEL}\n\n@app.get(\"/health\")\ndef health():\n    try:\n        r = req.get(f\"{QDRANT_URL}/collections/sensor_history\", timeout=5)\n        info = r.json().get(\"result\", {})\n        twin = get_twin()\n        return {\"status\": \"healthy\", \"qdrant_points\": info.get(\"points_count\", 0),\n                \"machines\": len(twin.get(\"machines\", {})), \"llm\": CEREBRAS_MODEL}\n    except Exception as e:\n        return {\"status\": \"degraded\", \"error\": str(e)}\n\n@app.get(\"/search\")\ndef search(q: str = \"temperature\", limit: int = 10):\n    results = search_qdrant(q, limit)\n    return {\"query\": q, \"count\": len(results),\n            \"results\": [{\"score\": p.get(\"score\"), \"text\": p.get(\"payload\", {}).get(\"text\", \"\")} for p in results]}\n\n@app.get(\"/stats\")\ndef stats():\n    r = req.get(f\"{QDRANT_URL}/collections/sensor_history\", timeout=5)\n    info = r.json().get(\"result\", {})\n    twin = get_twin()\n    return {\"points\": info.get(\"points_count\", 0), \"machines\": len(twin.get(\"machines\", {})),\n            \"twin_summary\": twin.get(\"summary\", {})}\n\n@app.get(\"/analyze\")\ndef analyze(q: str = \"summary\"):\n    return {\"query\": q, \"analysis\": generate_analysis(q)}\n\n@app.get(\"/v1/models\")\ndef models():\n    return {\"object\": \"list\", \"data\": [{\"id\": \"cerebrus-aiot\", \"object\": \"model\"}]}\n\n@app.post(\"/v1/chat/completions\")\nasync def chat(request: Request):\n    body = await request.json()\n    msgs = body.get(\"messages\", [])\n    user_msgs = [m for m in msgs if m.get(\"role\") == \"user\"]\n    q = user_msgs[-1][\"content\"].strip() if user_msgs else \"summary\"\n    \n    # Stream support check\n    stream = body.get(\"stream\", False)\n    \n    answer = generate_analysis(q)\n    \n    return {\n        \"id\": f\"cerebrus-{int(time.time())}\",\n        \"object\": \"chat.completion\",\n        \"model\": \"cerebrus-aiot\",\n        \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": answer}, \"finish_reason\": \"stop\"}],\n        \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}\n    }\n"},"kind":"ConfigMap","metadata":{"annotations":{},"name":"api-gateway-code","namespace":"aiot"}}
+  creationTimestamp: "2026-03-05T19:06:17Z"
+  name: api-gateway-code
+  namespace: aiot
+  resourceVersion: "813057"
+  uid: ff2a6825-7e12-4336-ae31-eb5a4c756b1a
