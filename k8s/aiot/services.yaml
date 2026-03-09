@@ -67,6 +67,35 @@ items:
   metadata:
     annotations:
       kubectl.kubernetes.io/last-applied-configuration: |
+        {"apiVersion":"v1","kind":"Service","metadata":{"annotations":{},"name":"ngrok-proxy","namespace":"aiot"},"spec":{"ports":[{"port":8090,"targetPort":8090}],"selector":{"app":"ngrok-proxy"}}}
+    creationTimestamp: "2026-03-08T07:35:32Z"
+    name: ngrok-proxy
+    namespace: aiot
+    resourceVersion: "1277930"
+    uid: 0faeb8f2-0f44-453a-8538-eb2744280ef4
+  spec:
+    clusterIP: 10.110.61.46
+    clusterIPs:
+    - 10.110.61.46
+    internalTrafficPolicy: Cluster
+    ipFamilies:
+    - IPv4
+    ipFamilyPolicy: SingleStack
+    ports:
+    - port: 8090
+      protocol: TCP
+      targetPort: 8090
+    selector:
+      app: ngrok-proxy
+    sessionAffinity: None
+    type: ClusterIP
+  status:
+    loadBalancer: {}
+- apiVersion: v1
+  kind: Service
+  metadata:
+    annotations:
+      kubectl.kubernetes.io/last-applied-configuration: |
         {"apiVersion":"v1","kind":"Service","metadata":{"annotations":{},"name":"pgadmin","namespace":"aiot"},"spec":{"ports":[{"nodePort":31080,"port":80,"targetPort":80}],"selector":{"app":"pgadmin"},"type":"NodePort"}}
     creationTimestamp: "2026-03-05T16:23:58Z"
     name: pgadmin
@@ -196,24 +225,26 @@ items:
     creationTimestamp: "2026-03-05T18:25:45Z"
     name: redis-master
     namespace: aiot
-    resourceVersion: "802306"
+    resourceVersion: "851266"
     uid: d84f6d7d-789c-4edd-9234-4d4152eb0f94
   spec:
     clusterIP: 10.98.4.56
     clusterIPs:
     - 10.98.4.56
+    externalTrafficPolicy: Cluster
     internalTrafficPolicy: Cluster
     ipFamilies:
     - IPv4
     ipFamilyPolicy: SingleStack
     ports:
-    - port: 6379
+    - nodePort: 31379
+      port: 6379
       protocol: TCP
       targetPort: 6379
     selector:
       app: redis-master
     sessionAffinity: None
-    type: ClusterIP
+    type: NodePort
   status:
     loadBalancer: {}
 - apiVersion: v1
