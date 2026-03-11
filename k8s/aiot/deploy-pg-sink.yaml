@@ -1,29 +1,17 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  annotations:
-    kubectl.kubernetes.io/last-applied-configuration: |
-      {"apiVersion":"apps/v1","kind":"Deployment","metadata":{"annotations":{},"labels":{"app":"pg-sink"},"name":"pg-sink","namespace":"aiot"},"spec":{"replicas":1,"selector":{"matchLabels":{"app":"pg-sink"}},"template":{"metadata":{"labels":{"app":"pg-sink"}},"spec":{"containers":[{"args":["pip install kafka-python-ng psycopg2-binary --quiet \u0026\u0026 python3 /code/pg_sink.py"],"command":["/bin/sh","-c"],"image":"python:3.11-slim","name":"pg-sink","resources":{"limits":{"cpu":"200m","memory":"256Mi"},"requests":{"cpu":"50m","memory":"128Mi"}},"volumeMounts":[{"mountPath":"/code","name":"code"}]}],"volumes":[{"configMap":{"name":"pg-sink-code"},"name":"code"}]}}}}
   labels:
     app: pg-sink
   name: pg-sink
   namespace: aiot
 spec:
-  progressDeadlineSeconds: 600
   replicas: 2
-  revisionHistoryLimit: 10
   selector:
     matchLabels:
       app: pg-sink
-  strategy:
-    rollingUpdate:
-      maxSurge: 25%
-      maxUnavailable: 25%
-    type: RollingUpdate
   template:
     metadata:
-      annotations:
-        kubectl.kubernetes.io/restartedAt: "2026-03-10T09:13:42Z"
       labels:
         app: pg-sink
     spec:
@@ -43,7 +31,6 @@ spec:
         - /bin/sh
         - -c
         image: python:3.11-slim
-        imagePullPolicy: IfNotPresent
         name: pg-sink
         resources:
           limits:
@@ -52,18 +39,10 @@ spec:
           requests:
             cpu: 100m
             memory: 128Mi
-        terminationMessagePath: /dev/termination-log
-        terminationMessagePolicy: File
         volumeMounts:
         - mountPath: /code
           name: code
-      dnsPolicy: ClusterFirst
-      restartPolicy: Always
-      schedulerName: default-scheduler
-      securityContext: {}
-      terminationGracePeriodSeconds: 30
       volumes:
       - configMap:
-          defaultMode: 420
           name: pg-sink-code
         name: code
