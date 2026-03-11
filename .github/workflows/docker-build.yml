@@ -30,7 +30,7 @@ jobs:
           context: .
           push: true
           tags: |
-            ondrejnr/k8s-cluster-backup:latest
-            ondrejnr/k8s-cluster-backup:${{ steps.date.outputs.tag }}
+            ondrejnr1/k8s-cluster-backup:latest
+            ondrejnr1/k8s-cluster-backup:${{ steps.date.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
