@@ -1,199 +1,180 @@
-# AIoT Platform - K8s Cluster Backup
+<div align="center">
 
-Complete Kubernetes cluster backup for the AIoT industrial monitoring platform.
+# AIoT Smart Factory Platform
 
-**Last updated:** 2026-03-10
+### AI-Powered Industrial IoT Monitoring and Analytics
 
-## Architecture
+**418 machines** -- **2 LLM models** -- **Zero-token answers for 75% of queries** -- **Real-time MQTT to AI pipeline**
 
-```
-Sensors (simulator) -> EMQX (MQTT) -> mqtt-kafka-bridge -> Redpanda (Kafka)
-                                                              |
-                                                    qdrant-indexer -> Qdrant (vectors)
-                                                    pg-sink -> PostgreSQL (history)
-                                                    redis-pg-flusher -> Redis -> PostgreSQL
+---
+</div>
 
-User (Open WebUI) -> API Gateway (Cerebrus) -> RAG Worker v9
-                                                 |-- Simple query -> Bank (Redis db=5) -> 0 tokens
-                                                 |-- Repeat query -> Cache (Redis db=3) -> 0 tokens
-                                                 |-- Junk query   -> Blocked            -> 0 tokens
-                                                 +-- Complex query -> Cerebras LLM      -> ~500 tokens
+## AI-First Architecture
 
-Ngrok tunnel -> RAG Worker (same pipeline)
-```
-
-## Components
-
-### Namespace: aiot
-
-| Component | Type | Description |
-|-----------|------|-------------|
-| sensor-simulator | Deployment | Generates IoT sensor data (418 machines) |
-| redis-master | Deployment | Central cache + real-time data store |
-| qdrant | Deployment | Vector database for RAG |
-| qdrant-indexer | Deployment | Indexes sensor data into Qdrant |
-| pg-sink | Deployment | Writes sensor data to PostgreSQL |
-| redis-pg-flusher | Deployment | Flushes Redis data to PostgreSQL |
-| postgres | StatefulSet | PostgreSQL with partitioned tables |
-| redpanda | StatefulSet | Kafka-compatible message broker |
-| digital-twin | Deployment | Digital twin engine |
-| api-gateway | Deployment | Cerebrus API gateway |
-| rag-worker | Deployment | RAG Worker v9 (bank/cache/LLM routing) |
-| ngrok-proxy | Deployment | Proxy for ngrok tunnel |
-| pgadmin | Deployment | PostgreSQL admin UI |
-| pg-partition-mgr | CronJob | Auto-creates monthly partitions |
-
-### Namespace: emqx
-
-| Component | Type | Description |
-|-----------|------|-------------|
-| emqx | StatefulSet | MQTT broker |
-| mqtt-kafka-bridge | Deployment | MQTT to Kafka bridge |
-
-### Namespace: default
-
-| Component | Type | Description |
-|-----------|------|-------------|
-| elasticsearch | Deployment | Log storage |
-| kibana | Deployment | Log visualization |
-| grafana | Deployment | Metrics dashboards |
-| prometheus | Deployment | Metrics collector |
-| ws-proxy | Deployment | WebSocket proxy |
-| lamp-deployment | Deployment | LAMP stack |
-
-### Docker (host)
-
-| Component | Description |
-|-----------|-------------|
-| open-webui | Chat UI (port 8080) |
-| ngrok | Tunnel to RAG API (systemd service) |
-
-## LLM Pipeline (RAG Worker v9)
+This platform processes **real-time industrial sensor data** through an AI pipeline
+that combines **vector search**, **Redis-cached analytics**, and **dual LLM inference**
+(Cerebras + Groq) to deliver instant factory insights.
 
 ```
-Query -> is_junk()? -> BLOCK (0 tokens)
-      -> is_simple()? -> Redis Bank (db=5) -> 0 tokens
-      -> Cache hit? -> Redis Cache (db=3) -> 0 tokens
-      -> Default -> Cerebras LLM (llama3.1-8b) -> ~500 tokens
+                         +-------------------------------------+
+                         |          Open WebUI (:8080)          |
+                         |        Chat Interface (Docker)       |
+                         +------+----------------+-------------+
+                                |                |
+                    +-----------+--+     +-------+----------+
+                    | cerebrus-aiot|     |    groq-aiot      |
+                    |   (:31700)   |     |    (:31090)       |
+                    |  rag-worker  |     |   ngrok-proxy     |
+                    +------+-------+     +------+-----------+
+                           |                    |
+                    +------+--------------------+------+
+                    |        Redis BANK (DB5)          |
+                    |   Pre-computed Analytics Cache    |
+                    +------------------+---------------+
+                                       | cache miss only
+                           +-----------+-----------+
+                           |    LLM Inference       |
+                           |  Cerebras / Groq API   |
+                           +------------------------+
 ```
 
-**Provider:** Cerebras | **Model:** llama3.1-8b | **Secret:** cerebras-api-key
+## Bank-First Intelligence Pattern
+
+The core innovation is the **Bank-First pattern** -- a Redis-cached analytics layer
+that answers most factory queries **without any LLM API call**:
+
+- **SIMPLE** queries (summary, status, count) --> Redis BANK --> **under 50ms, 0 tokens**
+- **COMPLEX** queries (why, compare, recommend) --> LLM API --> ~500ms, with tokens
+- **Result: ~75% of user queries consume zero tokens**
+
+## Real-Time Data Pipeline
+
+```
++----------------+     +--------------+     +--------------+
+|   Sensor       |MQTT |    EMQX      |     |  Redpanda    |
+|  Simulator     +---->|  (3 nodes)   +---->|   (Kafka)    |
+|  418 machines  |:1883|  MQTT Broker |     |  Streaming   |
++----------------+     +--------------+     +------+-------+
+                                                   |
+                     +-----------------------------+---------------+
+                     |                             |               |
+              +------+------+            +---------+----+ +--------+-----+
+              |   pg-sink   |            | mongo-sink   | |  qdrant-     |
+              |  > Postgres |            | > MongoDB    | |  indexer     |
+              +------+------+            +------+-------+ +------+------+
+                     |                          |                |
+              +------+------+            +------+-------+ +------+------+
+              | PostgreSQL  |            |   MongoDB    | |   Qdrant    |
+              |  Time-series|            |  Documents   | |  Vectors    |
+              |    10 Gi    |            |    5 Gi      | |   15 Gi     |
+              +------+------+            +--------------+ +-------------+
+                     |
+              +------+-----------+
+              |  redis-pg-flusher|
+              |  (3 replicas)    |
+              |  Batch > Redis   |
+              |  DB5 (BANK)      |
+              +------------------+
+```
+
+## Data Flow
+
+1. **Sensor Simulator** generates IoT data (temp, vibration, pressure, rpm) for 418 machines
+2. **EMQX** (3-node MQTT cluster) receives and distributes messages
+3. **MQTT-Kafka Bridge** forwards MQTT topics to Redpanda/Kafka
+4. **pg-sink** writes time-series data to PostgreSQL
+5. **mongo-sink** stores documents in MongoDB
+6. **qdrant-indexer** creates vector embeddings in Qdrant
+7. **redis-pg-flusher** (3 replicas) computes aggregates into Redis BANK (DB5)
+8. **LLM layer** (rag-worker / ngrok-proxy) answers user questions using BANK data or LLM API
+
+## Dual LLM Setup
+
+Two independent LLM backends serve the same factory data:
+
+- **cerebrus-aiot** (port 31700) -- Cerebras llama-4-scout via rag-worker (2 replicas)
+- **groq-aiot** (port 31090) -- Groq llama-3.3-70b via ngrok-proxy (2 replicas)
+
+Both share the same Redis BANK, same classification logic, same instant answers for simple queries.
+They differ only in LLM reasoning for complex queries.
+API keys stored as Kubernetes Secrets (not in this repo).
+
+## High Availability
+
+- api-gateway: 2 replicas + PDB (minAvailable: 1)
+- ngrok-proxy: 2 replicas + PDB (minAvailable: 1)
+- rag-worker: 2 replicas + PDB (minAvailable: 1)
+- digital-twin: 2 replicas
+- Redis: 3 nodes + 3 sentinels
+- EMQX: 3 nodes
+- redis-pg-flusher: 3 replicas
+- Open WebUI: Docker restart=always
 
 ## Repository Structure
 
 ```
 k8s/
-  aiot/              30 manifests (deployments, configmaps, secrets, ingress, cronjob)
-  emqx/               5 manifests (emqx statefulset, mqtt-kafka-bridge)
-  default/           13 manifests (grafana, kibana, elasticsearch, prometheus, ws-proxy, lamp)
-src/
-  rag-worker/         worker.py         - RAG Worker v9 (bank/cache/LLM routing)
-  gateway/            gateway.py        - API Gateway (Cerebrus)
-  digital-twin/       twin.py, twin_v3.py - Digital Twin engine
-  sensor-simulator/   simulator.py      - IoT sensor data generator
-  ngrok-proxy/        proxy.py          - Ngrok proxy
-  pg-sink/            pg_sink.py        - PostgreSQL sink
-  qdrant-indexer/     indexer.py        - Qdrant vector indexer
-  redis-pg-flusher/   flusher.py        - Redis to PostgreSQL flusher
+  aiot/
+    configmaps/       17 ConfigMaps (all application code)
+    deployments/      15 Deployment manifests
+    statefulsets/      4 StatefulSets (postgres, redis, redpanda, mongodb)
+    services/         17 Services (NodePort + ClusterIP)
+    cronjobs/          4 CronJobs (watchdog, partitions, cleanup, backup)
+    pdb/               7 PodDisruptionBudgets
+    pvc/              PersistentVolumeClaims (Piraeus storage)
+    secrets/          Secret names only (values in K8s)
+  emqx/
+    emqx-statefulset.yaml    3-node EMQX cluster
+    mqtt-kafka-bridge.yaml   MQTT to Kafka bridge (2 replicas)
+    services.yaml
 config/
-  init.sql                              - PostgreSQL init schema
-  pgadmin-servers.json                  - PgAdmin server config
-scripts/
-  ngrok.service                         - Systemd service for ngrok tunnel
-  ngrok-update-webui.sh                 - Auto-updates ngrok URL in Open WebUI
-  open-webui-docker.sh                  - Docker run script for Open WebUI
+  docker/open-webui.json     Open WebUI container config
+  webui/webui-config.json    WebUI LLM connection settings
 ```
 
-## Full Restore
+## Port Map
 
-### 1. Prerequisites
+- 8080: Open WebUI (AI chat)
+- 31700: cerebrus-aiot (Cerebras LLM)
+- 31090: groq-aiot (Groq LLM)
+- 31801: Digital Twin API
+- 31883: EMQX MQTT
+- 31379: Redis
+- 31080: pgAdmin
+- 30881: Mongo Express
+
+## Automated Jobs
+
+- **cluster-watchdog**: every 10 min -- cluster health check
+- **pg-partition-mgr**: hourly -- PostgreSQL partition management
+- **pg-sensor-cleanup**: every 5 min -- old sensor data pruning
+- **postgres-backup**: every 6 hours -- PostgreSQL full backup
+
+## Secrets (not in repo)
+
+- cerebras-api-key (CEREBRAS_API_KEY) -- used by api-gateway
+- groq-api-key (GROQ_API_KEY) -- used by ngrok-proxy
+- pg-credentials (username, password) -- used by pg-sink, flusher
+
+## Disaster Recovery
 
 ```bash
-# Requires: Kubernetes cluster with ingress-nginx and longhorn storage class
 kubectl create namespace aiot
+kubectl create secret generic cerebras-api-key -n aiot --from-literal=CEREBRAS_API_KEY=YOUR_KEY
+kubectl create secret generic groq-api-key -n aiot --from-literal=GROQ_API_KEY=YOUR_KEY
+kubectl create secret generic pg-credentials -n aiot --from-literal=POSTGRES_USER=USER --from-literal=POSTGRES_PASSWORD=PASS
+kubectl apply -f k8s/aiot/configmaps/
+kubectl apply -f k8s/aiot/pvc/
+kubectl apply -f k8s/aiot/services/
+kubectl apply -f k8s/aiot/statefulsets/
+sleep 30
+kubectl apply -f k8s/aiot/deployments/
+kubectl apply -f k8s/aiot/cronjobs/
+kubectl apply -f k8s/aiot/pdb/
 kubectl create namespace emqx
+kubectl apply -f k8s/emqx/
+docker run -d --name open-webui --restart=always --network host -v open-webui:/app/backend/data ghcr.io/open-webui/open-webui:main
 ```
 
-### 2. Secrets
-
-```bash
-kubectl apply -f k8s/aiot/secret-cerebras-api-key.yaml
-kubectl apply -f k8s/aiot/secret-pg-credentials.yaml
-```
-
-### 3. ConfigMaps
-
-```bash
-kubectl apply -f k8s/aiot/cm-*.yaml
-kubectl apply -f k8s/emqx/cm-*.yaml
-kubectl apply -f k8s/default/cm-*.yaml
-```
-
-### 4. StatefulSets (databases first)
-
-```bash
-kubectl apply -f k8s/aiot/ss-postgres.yaml
-kubectl apply -f k8s/aiot/ss-redpanda.yaml
-kubectl apply -f k8s/emqx/ss-emqx.yaml
-# Wait for databases to be ready:
-kubectl wait --for=condition=ready pod -l app=postgres -n aiot --timeout=120s
-kubectl wait --for=condition=ready pod -l app=redpanda -n aiot --timeout=120s
-```
-
-### 5. Services
-
-```bash
-kubectl apply -f k8s/aiot/services.yaml
-kubectl apply -f k8s/emqx/services.yaml
-kubectl apply -f k8s/default/services.yaml
-```
-
-### 6. Deployments
-
-```bash
-kubectl apply -f k8s/aiot/deploy-*.yaml
-kubectl apply -f k8s/emqx/deploy-*.yaml
-kubectl apply -f k8s/default/deploy-*.yaml
-```
-
-### 7. Ingress and CronJobs
-
-```bash
-kubectl apply -f k8s/aiot/ingress.yaml
-kubectl apply -f k8s/aiot/cj-pg-partition-mgr.yaml
-```
-
-### 8. Open WebUI + Ngrok (host level)
-
-```bash
-bash scripts/open-webui-docker.sh
-sudo cp scripts/ngrok.service /etc/systemd/system/
-sudo cp scripts/ngrok-update-webui.sh /usr/local/bin/
-sudo chmod +x /usr/local/bin/ngrok-update-webui.sh
-sudo systemctl daemon-reload
-sudo systemctl enable --now ngrok.service
-```
-
-## Quick Restore (single command)
-
-```bash
-git clone https://github.com/ondrejnr/k8s-cluster-backup.git && cd k8s-cluster-backup
-kubectl create ns aiot && kubectl create ns emqx
-kubectl apply -f k8s/aiot/secret-*.yaml
-kubectl apply -f k8s/aiot/cm-*.yaml && kubectl apply -f k8s/emqx/cm-*.yaml && kubectl apply -f k8s/default/cm-*.yaml
-kubectl apply -f k8s/aiot/ss-*.yaml && kubectl apply -f k8s/emqx/ss-*.yaml
-kubectl apply -f k8s/aiot/services.yaml && kubectl apply -f k8s/emqx/services.yaml && kubectl apply -f k8s/default/services.yaml
-kubectl apply -f k8s/aiot/deploy-*.yaml && kubectl apply -f k8s/emqx/deploy-*.yaml && kubectl apply -f k8s/default/deploy-*.yaml
-kubectl apply -f k8s/aiot/ingress.yaml && kubectl apply -f k8s/aiot/cj-*.yaml
-bash scripts/open-webui-docker.sh
-```
-
-## Access URLs
-
-| Service | URL |
-|---------|-----|
-| Open WebUI | http://localhost:8080 |
-| Cerebrus API | http://cerebrus.YOUR_IP.nip.io |
-| RAG API | http://rag.YOUR_IP.nip.io |
-| PgAdmin | http://pgadmin.YOUR_IP.nip.io |
-| Ngrok (external) | https://[dynamic].ngrok-free.dev |
+---
+Backup date: 2026-03-15
