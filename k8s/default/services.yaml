@@ -9,7 +9,7 @@ items:
     name: elasticsearch-svc
     namespace: default
   spec:
-    - 10.97.69.109
+    clusterIP: 10.97.69.109
     internalTrafficPolicy: Cluster
     ipFamilies:
     - IPv4
@@ -33,7 +33,7 @@ items:
     name: grafana-svc
     namespace: default
   spec:
-    - 10.99.168.152
+    clusterIP: 10.99.168.152
     internalTrafficPolicy: Cluster
     ipFamilies:
     - IPv4
@@ -57,7 +57,7 @@ items:
     name: kibana-svc
     namespace: default
   spec:
-    - 10.106.163.171
+    clusterIP: 10.106.163.171
     externalTrafficPolicy: Cluster
     internalTrafficPolicy: Cluster
     ipFamilies:
@@ -83,7 +83,7 @@ items:
     name: kubernetes
     namespace: default
   spec:
-    - 10.96.0.1
+    clusterIP: 10.96.0.1
     internalTrafficPolicy: Cluster
     ipFamilies:
     - IPv4
@@ -106,7 +106,7 @@ items:
     name: lamp-service
     namespace: default
   spec:
-    - 10.106.58.52
+    clusterIP: 10.106.58.52
     internalTrafficPolicy: Cluster
     ipFamilies:
     - IPv4
@@ -135,7 +135,7 @@ items:
     name: prometheus-svc
     namespace: default
   spec:
-    - 10.98.33.73
+    clusterIP: 10.98.33.73
     internalTrafficPolicy: Cluster
     ipFamilies:
     - IPv4
