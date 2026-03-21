@@ -14,7 +14,7 @@ pipeline {
     stage('Prepare workspace') { steps { sh '''
       set -eux
       rm -rf "${SNAPSHOT_DIR}"
-      mkdir -p "${SNAPSHOT_DIR}"/{meta,cluster,rbac,storage,network,workloads,nodes,events,security,errors}
+      mkdir -p "${SNAPSHOT_DIR}/meta" "${SNAPSHOT_DIR}/cluster" "${SNAPSHOT_DIR}/rbac" "${SNAPSHOT_DIR}/storage" "${SNAPSHOT_DIR}/network" "${SNAPSHOT_DIR}/workloads" "${SNAPSHOT_DIR}/nodes" "${SNAPSHOT_DIR}/events" "${SNAPSHOT_DIR}/security" "${SNAPSHOT_DIR}/errors"
     ''' } }
     stage('Fingerprint') { steps { sh '''
       set +e
