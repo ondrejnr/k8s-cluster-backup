@@ -34,7 +34,6 @@ pipeline {
       y "${SNAPSHOT_DIR}/nodes/nodes.yaml" "${KUBECTL_BIN}" get nodes
       t "${SNAPSHOT_DIR}/nodes/nodes-wide.txt" "${KUBECTL_BIN}" get nodes -o wide
       t "${SNAPSHOT_DIR}/nodes/nodes-describe.txt" "${KUBECTL_BIN}" describe nodes
-      j "${SNAPSHOT_DIR}/nodes/pods.json" "${KUBECTL_BIN}" get pods -A
 
       y "${SNAPSHOT_DIR}/workloads/pods.yaml" "${KUBECTL_BIN}" get pods -A
       t "${SNAPSHOT_DIR}/workloads/pods-wide.txt" "${KUBECTL_BIN}" get pods -A -o wide
@@ -69,42 +68,31 @@ pipeline {
       y "${SNAPSHOT_DIR}/events/events.yaml" "${KUBECTL_BIN}" get events -A
       t "${SNAPSHOT_DIR}/events/events-sort-by-time.txt" "${KUBECTL_BIN}" get events -A --sort-by=.lastTimestamp
 
-      j "${SNAPSHOT_DIR}/security/secrets-raw.json" "${KUBECTL_BIN}" get secrets -A
+      {
+        echo "apiVersion: v1"
+        echo "kind: List"
+        echo "items:"
+        "${KUBECTL_BIN}" get secrets -A -o jsonpath='{range .items[*]}- apiVersion: v1{"\n"}  kind: Secret{"\n"}  metadata:{"\n"}    namespace: {.metadata.namespace}{"\n"}    name: {.metadata.name}{"\n"}  type: {.type}{"\n"}{end}'
+        echo
+      } > "${SNAPSHOT_DIR}/security/secrets-metadata.yaml" 2>>"$err" || true
 
-      python3 - <<'PY'
-import json, os, collections
-base="snapshot"; os.makedirs(f"{base}/security", exist_ok=True); os.makedirs(f"{base}/nodes", exist_ok=True)
-raw=f"{base}/security/secrets-raw.json"; out=f"{base}/security/secrets-metadata.yaml"
-if os.path.exists(raw) and os.path.getsize(raw)>0:
-    data=json.load(open(raw))
-    with open(out,"w") as f:
-        f.write("apiVersion: v1\nkind: List\nitems:\n")
-        for item in data.get("items",[]):
-            m=item.get("metadata",{}); anns=sorted((m.get("annotations") or {}).keys()); labels=m.get("labels") or {}
-            f.write("- apiVersion: v1\n  kind: Secret\n  metadata:\n")
-            f.write(f"    name: {m.get('name','')}\n    namespace: {m.get('namespace','')}\n    labels:\n")
-            if labels:
-                for k,v in sorted(labels.items()): f.write(f"      {k}: {v}\n")
-            else: f.write("      {}\n")
-            f.write("    annotationKeys:\n")
-            if anns:
-                for k in anns: f.write(f"    - {k}\n")
-            else: f.write("    - null\n")
-            f.write(f"  type: {item.get('type','')}\n")
-else:
-    open(out,"w").write("apiVersion: v1\nkind: List\nitems: []\n")
-pods=json.load(open(f"{base}/nodes/pods.json")) if os.path.exists(f"{base}/nodes/pods.json") and os.path.getsize(f"{base}/nodes/pods.json")>0 else {"items":[]}
-by_node=collections.defaultdict(list)
-for p in pods.get("items",[]):
-    spec=p.get("spec",{}); meta=p.get("metadata",{}); status=p.get("status",{})
-    by_node[spec.get("nodeName","<unassigned>")].append((meta.get("namespace",""),meta.get("name",""),status.get("phase",""),status.get("podIP","")))
-with open(f"{base}/nodes/pods-by-node.txt","w") as f:
-    for node in sorted(by_node):
-        f.write(f"=== {node} ({len(by_node[node])} pods) ===\n")
-        for ns,name,phase,ip in sorted(by_node[node]): f.write(f"{ns}\t{name}\t{phase}\t{ip}\n")
-        f.write("\n")
-PY
-      rm -f "${SNAPSHOT_DIR}/security/secrets-raw.json"
+      "${KUBECTL_BIN}" get pods -A -o jsonpath='{range .items[*]}{.spec.nodeName}{"\t"}{.metadata.namespace}{"\t"}{.metadata.name}{"\t"}{.status.phase}{"\t"}{.status.podIP}{"\n"}{end}' \
+        | sort > "${SNAPSHOT_DIR}/nodes/pods-by-node.txt" 2>>"$err" || true
+
+      "${KUBECTL_BIN}" get nodes -o jsonpath='{range .items[*]}=== {.metadata.name} ==={"\n"}{range $k,$v := .metadata.labels}{$k}={$v}{"\n"}{end}{"\n"}{end}' \
+        > "${SNAPSHOT_DIR}/nodes/node-labels.txt" 2>>"$err" || true
+
+      "${KUBECTL_BIN}" get nodes -o jsonpath='{range .items[*]}=== {.metadata.name} ==={"\n"}{range .spec.taints[*]}{.key}={.value}:{.effect}{"\n"}{end}{"\n"}{end}' \
+        > "${SNAPSHOT_DIR}/nodes/node-taints.txt" 2>>"$err" || true
+
+      {
+        echo "Cluster fingerprint summary"
+        echo "=========================="
+        echo
+        echo "Generated files:"
+        find "${SNAPSHOT_DIR}" -type f | sort
+      } > "${SNAPSHOT_DIR}/meta/summary.txt"
+
       find "${SNAPSHOT_DIR}" -type f | sort > "${SNAPSHOT_DIR}/meta/file-list.txt"
       exit 0
     ''' } }
