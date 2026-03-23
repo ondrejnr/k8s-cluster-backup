@@ -1,5 +1,5 @@
 pipeline {
-  agent { label 'built-in' }
+  agent { label 'jenkins-agent' }
   options { timestamps(); disableConcurrentBuilds(); buildDiscarder(logRotator(numToKeepStr: '20')) }
   environment { KUBECTL_VERSION='v1.30.10'; KUBECTL_BIN='/tmp/kubectl'; SNAPSHOT_DIR='snapshot' }
   stages {
